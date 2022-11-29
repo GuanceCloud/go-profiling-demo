@@ -5,6 +5,7 @@ MAINTAINER zhangyi905@guance.com
 COPY . /usr/local/go-profiling-demo
 WORKDIR /usr/local/go-profiling-demo
 
+RUN go env -w GOPROXY="https://goproxy.cn,direct"
 RUN go build
 
 ARG DK_DATAWAY=https://openway.guance.com?token=tkn_f5b2989ba6ab44bc988cf7e2aa4a6de3
