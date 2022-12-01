@@ -77,15 +77,14 @@ func readMovies() ([]Movie, error) {
 func main() {
 
 	err := profiler.Start(
-		profiler.WithAgentAddr("127.0.0.1:9529"),
 		profiler.WithProfileTypes(
 			profiler.CPUProfile,
 			profiler.HeapProfile,
 
 			// The profiles below are disabled by default to keep overhead
 			// low, but can be enabled as needed.
-			// profiler.BlockProfile,
-			// profiler.MutexProfile,
+			profiler.BlockProfile,
+			profiler.MutexProfile,
 
 			profiler.GoroutineProfile,
 		),

@@ -1,5 +1,5 @@
 # go-profiling-demo
-One simple go app for datakit profiling demonstrating
+One simple go app for [DataKit](https://www.guance.com) continuous profiling demonstrating
 
 ## 宿主机运行
 
@@ -14,7 +14,9 @@ $ go build
 ### 运行
 
 ```shell
-$ DD_SERVICE=go-profiling-demo \
+$ DD_AGENT_HOST=127.0.0.1 \
+DD_TRACE_AGENT_PORT=9529 \
+DD_SERVICE=go-profiling-demo \
 DD_ENV=demo \
 DD_VERSION=v0.0.1 \
 ./go-profiling-demo

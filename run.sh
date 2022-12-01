@@ -7,4 +7,4 @@ if [ $? -ne 0 ]; then
 fi
 
 
-DD_SERVICE=go-profiling-demo DD_ENV=demo DD_VERSION=v0.0.1 ./go-profiling-demo
+DD_AGENT_HOST=127.0.0.1 DD_TRACE_AGENT_PORT=9529 DD_SERVICE=go-profiling-demo DD_ENV=demo DD_VERSION=v0.0.1 ./go-profiling-demo
