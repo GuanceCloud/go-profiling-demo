@@ -14,7 +14,9 @@ $ go build
 ### 运行
 
 ```shell
-$ DD_AGENT_HOST=127.0.0.1 \
+$ DD_TRACE_ENABLED=true \
+DD_PROFILING_ENABLED=true \
+DD_AGENT_HOST=127.0.0.1 \
 DD_TRACE_AGENT_PORT=9529 \
 DD_SERVICE=go-profiling-demo \
 DD_ENV=demo \

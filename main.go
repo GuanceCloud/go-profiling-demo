@@ -89,8 +89,10 @@ func isENVTrue(key string) bool {
 
 func main() {
 
-	tracer.Start()
-	defer tracer.Stop()
+	if isENVTrue("DD_TRACE_ENABLED") {
+		tracer.Start()
+		defer tracer.Stop()
+	}
 
 	if isENVTrue("DD_PROFILING_ENABLED") {
 		err := profiler.Start(
@@ -102,7 +104,6 @@ func main() {
 				// low, but can be enabled as needed.
 				profiler.BlockProfile,
 				profiler.MutexProfile,
-
 				profiler.GoroutineProfile,
 			),
 		)
