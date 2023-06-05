@@ -1,0 +1,21 @@
+version: "3"
+services:
+  movies-go:
+    build: .
+    ports:
+      - "8080:8080"
+    container_name: movies-go
+    environment:
+      DD_AGENT_HOST: "datakit"
+      DD_TRACE_ENABLED: "true"
+      DD_PROFILING_ENABLED: "true"
+  datakit:
+    image: pubrepo.jiagouyun.com/datakit/datakit:1.6.0
+    container_name: datakit
+    environment:
+      ENV_DATAWAY: "${DK_DATAWAY}"
+      ENV_DEFAULT_ENABLED_INPUTS: "${ENV_DEFAULT_ENABLED_INPUTS}"
+      ENV_LOG: "${ENV_LOG}"
+      ENV_GIN_LOG: "${ENV_GIN_LOG}"
+      ENV_ENABLE_ELECTION: "enable"
+      ENV_HTTP_LISTEN: "0.0.0.0:9529"

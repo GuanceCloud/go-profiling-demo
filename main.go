@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"sort"
 	"strings"
@@ -38,7 +39,7 @@ func (m Movies) Len() int {
 }
 
 func (m Movies) Less(i, j int) bool {
-	time.Sleep(time.Microsecond * 100)
+	time.Sleep(time.Microsecond * 10)
 	t1, err := time.Parse("2006-01-02", m[i].ReleaseDate)
 	if err != nil {
 		return false
@@ -77,30 +78,41 @@ func readMovies() ([]Movie, error) {
 	return movies, nil
 }
 
+func isENVTrue(key string) bool {
+	val := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	switch val {
+	case "", "0", "false":
+		return false
+	}
+	return true
+}
+
 func main() {
 
 	tracer.Start()
 	defer tracer.Stop()
 
-	err := profiler.Start(
-		profiler.WithProfileTypes(
-			profiler.CPUProfile,
-			profiler.HeapProfile,
+	if isENVTrue("DD_PROFILING_ENABLED") {
+		err := profiler.Start(
+			profiler.WithProfileTypes(
+				profiler.CPUProfile,
+				profiler.HeapProfile,
 
-			// The profiles below are disabled by default to keep overhead
-			// low, but can be enabled as needed.
-			profiler.BlockProfile,
-			profiler.MutexProfile,
+				// The profiles below are disabled by default to keep overhead
+				// low, but can be enabled as needed.
+				profiler.BlockProfile,
+				profiler.MutexProfile,
 
-			profiler.GoroutineProfile,
-		),
-	)
+				profiler.GoroutineProfile,
+			),
+		)
 
-	if err != nil {
-		log.Fatal(err)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		defer profiler.Stop()
 	}
-
-	defer profiler.Stop()
 
 	router := gin.New()
 	router.Use(gintrace.Middleware("go-profiling-demo"))
@@ -135,7 +147,27 @@ func main() {
 		}
 	})
 
-	if err := router.Run(":8080"); err != nil {
+	pprofGroup := router.Group("/debug/pprof")
+	pprofGroup.GET("/", func(ctx *gin.Context) {
+		pprof.Index(ctx.Writer, ctx.Request)
+	})
+	pprofGroup.GET("/:name", func(ctx *gin.Context) {
+		pprof.Index(ctx.Writer, ctx.Request)
+	})
+	pprofGroup.GET("/cmdline", func(ctx *gin.Context) {
+		pprof.Cmdline(ctx.Writer, ctx.Request)
+	})
+	pprofGroup.GET("/profile", func(ctx *gin.Context) {
+		pprof.Profile(ctx.Writer, ctx.Request)
+	})
+	pprofGroup.GET("/symbol", func(ctx *gin.Context) {
+		pprof.Symbol(ctx.Writer, ctx.Request)
+	})
+	pprofGroup.GET("/trace", func(ctx *gin.Context) {
+		pprof.Trace(ctx.Writer, ctx.Request)
+	})
+
+	if err := http.ListenAndServe(":8080", router); err != nil {
 		log.Fatal(err)
 	}
 }

@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: movies-go
+  labels:
+    app: movies-go
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: movies-go
+  template:
+    metadata:
+      name: movies-go
+      labels:
+        app: movies-go
+    spec:
+      shareProcessNamespace: true
+      containers:
+        - name: movies-go
+          image: zhangyicloud/movies-go:latest
+          imagePullPolicy: Always
+          env:
+            - name: DD_TRACE_ENABLED
+              value: "false"
+            - name: DD_PROFILING_ENABLED
+              value: "false"
+
+        - name: datakit
+          image: pubrepo.jiagouyun.com/datakit/datakit:1.6.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: ENV_DATAWAY
+              value: "https://openway.guance.com?token=tkn_f5b2989ba6ab44bc988cf7e2aa4a6de3"
+            - name: ENV_DEFAULT_ENABLED_INPUTS
+              value: "container,ddtrace,profile,self"
+            - name: ENV_LOG
+              value: stdout
+            - name: ENV_GIN_LOG
+              value: stdout
+            - name: ENV_HTTP_LISTEN
+              value: "0.0.0.0:9529"
+
+        - name: datakit-profiler
+          image: pubrepo.jiagouyun.com/dataflux/pprof:0.1.0
+          imagePullPolicy: IfNotPresent
+          workingDir: /app/datakit-profiler
+          env:
+            - name: DK_AGENT_HOST # datakit listening host
+              value: "127.0.0.1"
+            - name: DK_AGENT_PORT # datakit listening port
+              value: "9529"
+            - name: DK_PROFILE_VERSION # user's app version
+              value: "1.2.333"
+            - name: DK_PROFILE_ENV # user's app run env
+              value: "prod"
+            - name: DK_PROFILE_DURATION # profiling duration at every time
+              value: "240"
+            - name: DK_PROFILE_SCHEDULE # profiling schedule plan
+              value: "*/20 * * * *"
+          command:
+            - bash
+            - "-c"
+            - "./profiling.sh --add-crontab; cron -f"
+          securityContext:
+            capabilities:
+              add:
+                - SYS_PTRACE
+          volumeMounts:
+            - mountPath: /etc/localtime
+              name: timezone
+              readOnly: true
+      restartPolicy: Always
+      volumes:
+        - name: timezone
+          hostPath:
+            path: /etc/localtime
+            type: FileOrCreate
