@@ -42,8 +42,8 @@ spec:
               value: "0.0.0.0:9529"
 
         - name: datakit-profiler
-          image: pubrepo.jiagouyun.com/dataflux/pprof:0.1.0
-          imagePullPolicy: IfNotPresent
+          image: pubrepo.jiagouyun.com/datakit-operator/go-pprof:latest
+          imagePullPolicy: Always
           workingDir: /app/datakit-profiler
           env:
             - name: DK_AGENT_HOST # datakit listening host
@@ -59,13 +59,12 @@ spec:
             - name: DK_PROFILE_SCHEDULE # profiling schedule plan
               value: "*/20 * * * *"
           command:
-            - bash
-            - "-c"
-            - "./profiling.sh --add-crontab; cron -f"
+            - "cmd.sh"
           securityContext:
             capabilities:
               add:
                 - SYS_PTRACE
+                - SYS_ADMIN
           volumeMounts:
             - mountPath: /etc/localtime
               name: timezone
