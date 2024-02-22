@@ -183,10 +183,12 @@ func main() {
 			log.Printf("unable to extract span context from request header: %s", err)
 		}
 
-		spanCtx.ForeachBaggageItem(func(k, v string) bool {
-			log.Printf("span context extracted key value %s: %s\n", k, v)
-			return true
-		})
+		if spanCtx != nil {
+			spanCtx.ForeachBaggageItem(func(k, v string) bool {
+				log.Printf("span context extracted key value %s: %s\n", k, v)
+				return true
+			})
+		}
 
 		span := tracer.StartSpan("get_movies", tracer.ChildOf(spanCtx))
 		defer span.Finish()
