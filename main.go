@@ -13,14 +13,48 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 	"gopkg.in/DataDog/dd-trace-go.v1/profiler"
 )
+
+const BaseServiceName = "go-profiling-demo"
+
+type ctxKeyStruct struct {
+}
+
+var serviceNameKey = ctxKeyStruct{}
+
+var serviceId = func() *atomic.Int64 {
+	return &atomic.Int64{}
+}()
+
+func resetServiceID() {
+	serviceId.Store(0)
+}
+
+func getCurServID() string {
+	return strconv.FormatInt(serviceId.Load(), 10)
+}
+
+func getNextServID() string {
+	serviceId.Add(1)
+	return getCurServID()
+}
+
+func getCurServName() string {
+	return fmt.Sprintf("%s-%s", BaseServiceName, getCurServID())
+}
+
+func getNextServName() string {
+	return fmt.Sprintf("%s-%s", BaseServiceName, getNextServID())
+}
 
 var movies = func() []Movie {
 	movies, err := readMovies()
@@ -81,8 +115,9 @@ func isENVTrue(key string) bool {
 	return true
 }
 
-func sendHtmlRequest(ctx ddtrace.SpanContext, bodyText string) {
-	newSpan := tracer.StartSpan(GetCallerFuncName(), tracer.ChildOf(ctx))
+func sendHtmlRequest(ctx ddtrace.SpanContext, bodyText string, servName string) {
+	newSpan := tracer.StartSpan(GetCallerFuncName(), tracer.ChildOf(ctx),
+		tracer.ServiceName(servName))
 	defer newSpan.Finish()
 
 	req, err := http.NewRequest(http.MethodGet, "https://tv189.com/", strings.NewReader(strings.Repeat(bodyText, 1000)))
@@ -108,26 +143,29 @@ func sendHtmlRequest(ctx ddtrace.SpanContext, bodyText string) {
 	log.Println(string(body))
 }
 
-func fibonacci(ctx ddtrace.SpanContext, n int) int {
+func fibonacci(ctx ddtrace.SpanContext, n int, servName string) int {
 	if n <= 2 {
 		return 1
 	}
 	if n%31 == 0 {
-		return fibonacciWithTrace(ctx, n-1) + fibonacci(ctx, n-2)
+		return fibonacciWithTrace(ctx, n-1, servName) + fibonacciWithTrace(ctx, n-2, servName)
 	} else if n%37 == 0 {
-		return fibonacciWithTrace(ctx, n-1) + fibonacciWithTrace(ctx, n-2)
+		return fibonacciWithTrace(ctx, n-1, servName) + fibonacciWithTrace(ctx, n-2, servName)
 	}
-	return fibonacci(ctx, n-1) + fibonacci(ctx, n-2)
+	return fibonacci(ctx, n-1, servName) + fibonacci(ctx, n-2, servName)
 }
 
-func fibonacciWithTrace(ctx ddtrace.SpanContext, n int) int {
-	span := tracer.StartSpan(GetCallerFuncName(), tracer.ChildOf(ctx))
+func fibonacciWithTrace(ctx ddtrace.SpanContext, n int, servName string) int {
+	span := tracer.StartSpan(GetCallerFuncName(), tracer.ChildOf(ctx),
+		tracer.ServiceName(servName))
 	defer span.Finish()
-	return fibonacci(span.Context(), n-1) + fibonacci(span.Context(), n-2)
+	return fibonacci(span.Context(), n-1, servName) + fibonacci(span.Context(), n-2, servName)
 }
 
 func httpReqWithTrace(ctx ddtrace.SpanContext) {
-	span := tracer.StartSpan(GetCallerFuncName(), tracer.ChildOf(ctx))
+	span := tracer.StartSpan(GetCallerFuncName(), tracer.ChildOf(ctx),
+		tracer.ServiceName(getNextServName()),
+	)
 	defer span.Finish()
 
 	bodyText := `
@@ -136,15 +174,18 @@ func httpReqWithTrace(ctx ddtrace.SpanContext) {
 少小离家老大回，乡音无改鬓毛衰。
 儿童相见不相识，笑问客从何处来。
 `
+
 	for i := 0; i < 10; i++ {
-		sendHtmlRequest(span.Context(), bodyText)
+		sendHtmlRequest(span.Context(), bodyText, getCurServName())
 	}
 }
 
 func main() {
 
 	if isENVTrue("DD_TRACE_ENABLED") {
-		tracer.Start()
+		tracer.Start(
+			tracer.WithUniversalVersion("v0.8.888"),
+		)
 		defer tracer.Stop()
 	}
 
@@ -174,30 +215,32 @@ func main() {
 	//router.Use(gintrace.Middleware("go-profiling-demo"))
 
 	router.GET("/movies", func(ctx *gin.Context) {
-		for k := range ctx.Request.Header {
-			log.Printf("client request header %s: %s \n", k, ctx.GetHeader(k))
-		}
+		resetServiceID()
 
 		spanCtx, err := tracer.Extract(tracer.HTTPHeadersCarrier(ctx.Request.Header))
 		if err != nil {
 			log.Printf("unable to extract span context from request header: %s", err)
 		}
 
-		spanCtx.ForeachBaggageItem(func(k, v string) bool {
-			log.Printf("span context extracted key value %s: %s\n", k, v)
-			return true
-		})
+		if spanCtx != nil {
+			spanCtx.ForeachBaggageItem(func(k, v string) bool {
+				log.Printf("span context extracted key value %s: %s\n", k, v)
+				return true
+			})
+		}
 
-		span := tracer.StartSpan("get_movies", tracer.ChildOf(spanCtx))
+		span := tracer.StartSpan("get_movies", tracer.ChildOf(spanCtx),
+			tracer.ServiceName(getNextServName()))
 		defer span.Finish()
 
 		var wg sync.WaitGroup
 		wg.Add(2)
 
 		go func(ctx ddtrace.SpanContext) {
+
 			defer wg.Done()
 			param := 42
-			log.Printf("fibonacci(%d) = %d\n", param, fibonacci(ctx, param))
+			log.Printf("fibonacci(%d) = %d\n", param, fibonacci(ctx, param, getNextServName()))
 		}(span.Context())
 
 		go func(ctx ddtrace.SpanContext) {
@@ -209,6 +252,33 @@ func main() {
 
 		moviesCopy := make([]Movie, len(movies))
 		copy(moviesCopy, movies)
+
+		func() {
+			request, err := http.NewRequestWithContext(tracer.ContextWithSpan(ctx.Request.Context(), span),
+				http.MethodPost, "http://127.0.0.1:5888/foobar", nil)
+			if err != nil {
+				log.Println("unable to new request: ", err)
+				return
+			}
+			err = tracer.Inject(span.Context(), tracer.HTTPHeadersCarrier(request.Header))
+			if err != nil {
+				log.Println("unable to inject span to request: ", err)
+				return
+			}
+			resp, err := http.DefaultClient.Do(request)
+			if err != nil {
+				log.Println("unable to request go-http-client")
+				return
+			}
+			defer resp.Body.Close()
+
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				log.Println("unable to read request body: ", err)
+			}
+
+			fmt.Println("response: ", string(body))
+		}()
 
 		sort.Slice(moviesCopy, func(i, j int) bool {
 			time.Sleep(time.Microsecond * 10)

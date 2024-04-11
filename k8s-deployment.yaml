@@ -16,6 +16,10 @@ spec:
         app: movies-go
     spec:
       shareProcessNamespace: true
+      securityContext:
+        runAsUser: 1
+        runAsGroup: 1
+        fsGroup: 1
       containers:
         - name: movies-go
           image: zhangyicloud/movies-go:latest
@@ -61,6 +65,8 @@ spec:
           command:
             - "cmd.sh"
           securityContext:
+            runAsUser: 1
+            runAsGroup: 1
             capabilities:
               add:
                 - SYS_PTRACE
