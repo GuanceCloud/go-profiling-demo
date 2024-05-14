@@ -6,9 +6,11 @@ import (
 )
 
 func TestReadMovies(t *testing.T) {
-	if _, err := readMovies(); err != nil {
+	mov, err := readMovies()
+	if err != nil {
 		t.Fatal(err)
 	}
+	fmt.Println(len(mov))
 }
 
 func TestGetCallerFuncName(t *testing.T) {

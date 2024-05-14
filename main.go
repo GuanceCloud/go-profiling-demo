@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"compress/gzip"
+	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
-	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace"
 	"io"
 	"log"
 	"net/http"
@@ -19,6 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"gopkg.in/DataDog/dd-trace-go.v1/ddtrace/tracer"
 	"gopkg.in/DataDog/dd-trace-go.v1/profiler"
@@ -30,6 +33,9 @@ type ctxKeyStruct struct {
 }
 
 var serviceNameKey = ctxKeyStruct{}
+
+//go:embed movies5000.json.gz
+var moviesJSON []byte
 
 var serviceId = func() *atomic.Int64 {
 	return &atomic.Int64{}
@@ -86,24 +92,19 @@ func GetCallerFuncName() string {
 }
 
 func readMovies() ([]Movie, error) {
-	f, err := os.Open("./movies5000.json.gz")
-	if err != nil {
-		return nil, fmt.Errorf("open movies data file fail: %w", err)
-	}
-	defer f.Close()
-	r, err := gzip.NewReader(f)
+	r, err := gzip.NewReader(bytes.NewReader(moviesJSON))
 	if err != nil {
 		return nil, fmt.Errorf("gzip new reader from *FILE fail: %w", err)
 	}
 	defer r.Close()
 
-	var movies []Movie
+	var mov []Movie
 
-	if err := json.NewDecoder(r).Decode(&movies); err != nil {
+	if err := json.NewDecoder(r).Decode(&mov); err != nil {
 		return nil, fmt.Errorf("json unmarshal fail: %w", err)
 	}
 
-	return movies, nil
+	return mov, nil
 }
 
 func isENVTrue(key string) bool {
@@ -115,8 +116,8 @@ func isENVTrue(key string) bool {
 	return true
 }
 
-func sendHtmlRequest(ctx ddtrace.SpanContext, bodyText string, servName string) {
-	newSpan := tracer.StartSpan(GetCallerFuncName(), tracer.ChildOf(ctx),
+func sendHtmlRequest(ctx context.Context, bodyText string, servName string) {
+	newSpan, _ := tracer.StartSpanFromContext(ctx, GetCallerFuncName(),
 		tracer.ServiceName(servName))
 	defer newSpan.Finish()
 
@@ -143,7 +144,7 @@ func sendHtmlRequest(ctx ddtrace.SpanContext, bodyText string, servName string) 
 	log.Println(string(body))
 }
 
-func fibonacci(ctx ddtrace.SpanContext, n int, servName string) int {
+func fibonacci(ctx context.Context, n int, servName string) int {
 	if n <= 2 {
 		return 1
 	}
@@ -155,17 +156,16 @@ func fibonacci(ctx ddtrace.SpanContext, n int, servName string) int {
 	return fibonacci(ctx, n-1, servName) + fibonacci(ctx, n-2, servName)
 }
 
-func fibonacciWithTrace(ctx ddtrace.SpanContext, n int, servName string) int {
-	span := tracer.StartSpan(GetCallerFuncName(), tracer.ChildOf(ctx),
+func fibonacciWithTrace(ctx context.Context, n int, servName string) int {
+	span, newCtx := tracer.StartSpanFromContext(ctx, GetCallerFuncName(),
 		tracer.ServiceName(servName))
 	defer span.Finish()
-	return fibonacci(span.Context(), n-1, servName) + fibonacci(span.Context(), n-2, servName)
+	return fibonacci(newCtx, n-1, servName) + fibonacci(newCtx, n-2, servName)
 }
 
-func httpReqWithTrace(ctx ddtrace.SpanContext) {
-	span := tracer.StartSpan(GetCallerFuncName(), tracer.ChildOf(ctx),
-		tracer.ServiceName(getNextServName()),
-	)
+func httpReqWithTrace(ctx context.Context) {
+	span, newCtx := tracer.StartSpanFromContext(ctx, GetCallerFuncName(),
+		tracer.ServiceName(getNextServName()))
 	defer span.Finish()
 
 	bodyText := `
@@ -176,7 +176,7 @@ func httpReqWithTrace(ctx ddtrace.SpanContext) {
 `
 
 	for i := 0; i < 10; i++ {
-		sendHtmlRequest(span.Context(), bodyText, getCurServName())
+		sendHtmlRequest(newCtx, bodyText, getCurServName())
 	}
 }
 
@@ -214,6 +214,15 @@ func main() {
 	router := gin.New()
 	//router.Use(gintrace.Middleware("go-profiling-demo"))
 
+	// Access-Control-*
+	router.Use(cors.New(cors.Config{
+		AllowAllOrigins:  true,
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"},
+		AllowCredentials: true,
+		AllowHeaders:     []string{"*"},
+		MaxAge:           time.Hour * 24,
+	}))
+
 	router.GET("/movies", func(ctx *gin.Context) {
 		resetServiceID()
 
@@ -231,54 +240,55 @@ func main() {
 
 		span := tracer.StartSpan("get_movies", tracer.ChildOf(spanCtx),
 			tracer.ServiceName(getNextServName()))
+		newCtx := tracer.ContextWithSpan(ctx.Request.Context(), span)
 		defer span.Finish()
 
 		var wg sync.WaitGroup
 		wg.Add(2)
 
-		go func(ctx ddtrace.SpanContext) {
+		go func(ctx context.Context) {
 
 			defer wg.Done()
 			param := 42
 			log.Printf("fibonacci(%d) = %d\n", param, fibonacci(ctx, param, getNextServName()))
-		}(span.Context())
+		}(newCtx)
 
-		go func(ctx ddtrace.SpanContext) {
+		go func(ctx context.Context) {
 			defer wg.Done()
 			httpReqWithTrace(ctx)
-		}(span.Context())
+		}(newCtx)
 
 		q := ctx.Request.FormValue("q")
 
 		moviesCopy := make([]Movie, len(movies))
 		copy(moviesCopy, movies)
 
-		func() {
-			request, err := http.NewRequestWithContext(tracer.ContextWithSpan(ctx.Request.Context(), span),
-				http.MethodPost, "http://127.0.0.1:5888/foobar", nil)
-			if err != nil {
-				log.Println("unable to new request: ", err)
-				return
-			}
-			err = tracer.Inject(span.Context(), tracer.HTTPHeadersCarrier(request.Header))
-			if err != nil {
-				log.Println("unable to inject span to request: ", err)
-				return
-			}
-			resp, err := http.DefaultClient.Do(request)
-			if err != nil {
-				log.Println("unable to request go-http-client")
-				return
-			}
-			defer resp.Body.Close()
-
-			body, err := io.ReadAll(resp.Body)
-			if err != nil {
-				log.Println("unable to read request body: ", err)
-			}
-
-			fmt.Println("response: ", string(body))
-		}()
+		//func() {
+		//	request, err := http.NewRequestWithContext(tracer.ContextWithSpan(ctx.Request.Context(), span),
+		//		http.MethodPost, "http://127.0.0.1:5888/foobar", nil)
+		//	if err != nil {
+		//		log.Println("unable to new request: ", err)
+		//		return
+		//	}
+		//	err = tracer.Inject(span.Context(), tracer.HTTPHeadersCarrier(request.Header))
+		//	if err != nil {
+		//		log.Println("unable to inject span to request: ", err)
+		//		return
+		//	}
+		//	resp, err := http.DefaultClient.Do(request)
+		//	if err != nil {
+		//		log.Println("unable to request go-http-client")
+		//		return
+		//	}
+		//	defer resp.Body.Close()
+		//
+		//	body, err := io.ReadAll(resp.Body)
+		//	if err != nil {
+		//		log.Println("unable to read request body: ", err)
+		//	}
+		//
+		//	fmt.Println("response: ", string(body))
+		//}()
 
 		sort.Slice(moviesCopy, func(i, j int) bool {
 			time.Sleep(time.Microsecond * 10)
