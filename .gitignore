@@ -1,2 +1,3 @@
 # Ignore Intellij IDEA automatically generated file
 .idea/
+go-profiling-demo

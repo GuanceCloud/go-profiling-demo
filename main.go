@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"embed"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -29,13 +30,8 @@ import (
 
 const BaseServiceName = "go-profiling-demo"
 
-type ctxKeyStruct struct {
-}
-
-var serviceNameKey = ctxKeyStruct{}
-
 //go:embed movies5000.json.gz
-var moviesJSON []byte
+var jFile embed.FS
 
 var serviceId = func() *atomic.Int64 {
 	return &atomic.Int64{}
@@ -92,7 +88,12 @@ func GetCallerFuncName() string {
 }
 
 func readMovies() ([]Movie, error) {
-	r, err := gzip.NewReader(bytes.NewReader(moviesJSON))
+	jBytes, err := jFile.ReadFile("movies5000.json.gz")
+	if err != nil {
+		return nil, fmt.Errorf("unable to read movies: %w", err)
+	}
+
+	r, err := gzip.NewReader(bytes.NewReader(jBytes))
 	if err != nil {
 		return nil, fmt.Errorf("gzip new reader from *FILE fail: %w", err)
 	}
@@ -141,7 +142,7 @@ func sendHtmlRequest(ctx context.Context, bodyText string, servName string) {
 		return
 	}
 
-	log.Println(string(body))
+	log.Println("response body length: ", len(body))
 }
 
 func fibonacci(ctx context.Context, n int, servName string) int {
@@ -226,6 +227,12 @@ func main() {
 	router.GET("/movies", func(ctx *gin.Context) {
 		resetServiceID()
 
+		log.Println("----------header begin----------")
+		for k, v := range ctx.Request.Header {
+			log.Printf("header[%q] = %q\n", k, v)
+		}
+		log.Println("----------header end------------")
+
 		spanCtx, err := tracer.Extract(tracer.HTTPHeadersCarrier(ctx.Request.Header))
 		if err != nil {
 			log.Printf("unable to extract span context from request header: %s", err)
@@ -260,8 +267,11 @@ func main() {
 
 		q := ctx.Request.FormValue("q")
 
-		moviesCopy := make([]Movie, len(movies))
-		copy(moviesCopy, movies)
+		moviesCopy, err := readMovies()
+		if err != nil {
+			ctx.String(http.StatusInternalServerError, err.Error())
+			return
+		}
 
 		//func() {
 		//	request, err := http.NewRequestWithContext(tracer.ContextWithSpan(ctx.Request.Context(), span),
