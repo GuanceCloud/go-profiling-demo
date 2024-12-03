@@ -58,14 +58,6 @@ func getNextServName() string {
 	return fmt.Sprintf("%s-%s", BaseServiceName, getNextServID())
 }
 
-var movies = func() []Movie {
-	movies, err := readMovies()
-	if err != nil {
-		panic(err)
-	}
-	return movies
-}()
-
 type Movie struct {
 	Title       string  `json:"title"`
 	VoteAverage float64 `json:"vote_average"`
@@ -326,6 +318,7 @@ func main() {
 		}
 
 		encoder := json.NewEncoder(ctx.Writer)
+		encoder.SetIndent("", "    ")
 		if err := encoder.Encode(moviesCopy); err != nil {
 			log.Printf("encode into json fail: %s", err)
 			ctx.Writer.WriteHeader(http.StatusInternalServerError)
